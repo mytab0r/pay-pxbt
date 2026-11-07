@@ -23,6 +23,14 @@ jobs:
             node "$f"
           done
 
+      - name: run pay python tests (image guard, deploy verify)
+        run: |
+          set -e
+          for f in test/test_*.py; do
+            echo "=== $f ==="
+            python3 "$f"
+          done
+
       - name: build + run pay image (healthz, /admin 403, запись счёта)
         run: |
           set -e

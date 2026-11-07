@@ -1,0 +1,43 @@
+name: ci
+# Свой CI для pay.pxbt.app: только тесты этого проекта, без видеопайплайна.
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: run pay tests (wallet-verify + api + server)
+        run: |
+          set -e
+          for f in test/test_*.mjs; do
+            echo "=== $f ==="
+            node "$f"
+          done
+
+      - name: build + run pay image (healthz, /admin 403, запись счёта)
+        run: |
+          set -e
+          N=pay-ci-$GITHUB_RUN_ID
+          TOK=smoke-$GITHUB_RUN_ID
+          trap "docker rm -f $N >/dev/null 2>&1 || true" EXIT
+          docker build -q -f deploy/pay-page/Dockerfile -t pay-smoke .
+          D="$PWD/.ci-data"; mkdir -p "$D"; sudo chown 1000:1000 "$D"
+          docker run -d --name "$N" -p 18090:8080 -v "$D:/data" -e PAY_API_TOKEN="$TOK" pay-smoke
+          H=http://127.0.0.1:18090
+          for i in $(seq 1 30); do curl -fsS "$H/healthz" >/dev/null 2>&1 && break; sleep 1; done
+          test "$(curl -s -o /dev/null -w '%{http_code}' "$H/healthz")" = 200
+          test "$(curl -s -o /dev/null -w '%{http_code}' "$H/admin")" = 403
+          id=$(curl -fsS -X POST "$H/api/invoice" -H "authorization: Bearer $TOK" -d '{"amount":1}' | sed -n 's/.*"id":"\([a-z0-9]*\)".*/\1/p')
+          test -n "$id"
+          test "$(curl -s -o /dev/null -w '%{http_code}' "$H/i/$id")" = 200
+          grep -q "invoice:$id" "$D/kv.json"
+          docker logs "$N"

@@ -1,5 +1,5 @@
 name: image
-# ghcr.io/mytab0r/pay-pxbt:latest — имя образа не меняется, чтобы VPS и Watchtower
+# ghcr.io/mytab0r/pay-pxbt-app:latest — имя образа не меняется, чтобы VPS и Watchtower
 # продолжили подтягивать обновления без правок compose.
 on:
   push:
@@ -28,6 +28,6 @@ jobs:
           context: .
           file: deploy/pay-page/Dockerfile
           push: true
-          tags: ghcr.io/mytab0r/pay-pxbt:latest
+          tags: ghcr.io/mytab0r/pay-pxbt-app:latest
           build-args: |
             GIT_SHA=${{ github.sha }}

@@ -1,8 +1,8 @@
 /**
- * POST /api/u/settings { enabled?: {...}, btcAddress?: "bc1q…" }
+ * POST /api/u/settings { enabled?: {...}, btcAddress?: "bc1q…", tronAddress?: "T…" }
  * Только владелец по cookie pay_owner. Ключи enabled — лишь из известных сетей/токенов пользователя.
- * BTC принимается вручную: SafePal и большинство кошельков не отдают Bitcoin по WalletConnect
- * (в их namespace'ах нет bip122), а подпись BTC-адреса требует отдельного BTC-провайдера.
+ * BTC и Tron принимаются вручную: WalletConnect их не отдаёт (у SafePal нет namespace bip122,
+ * Tron вообще не входит в CAIP-сети кошельков), а подпись требует отдельного провайдера цепочки.
  */
 import { saveUser, userFromRequest, userNetworks, userKey } from '../../lib/users.js';
 import { validAddress } from '../../lib/config.js';
@@ -16,8 +16,8 @@ export async function onRequestPost({ env, request }) {
     return json({ ok: false, error: 'object required' }, 400);
   }
   const hasEnabled = body.enabled !== undefined;
-  const hasBtc = body.btcAddress !== undefined;
-  if (!hasEnabled && !hasBtc) return json({ ok: false, error: 'enabled or btcAddress required' }, 400);
+  const hasManual = body.btcAddress !== undefined || body.tronAddress !== undefined;
+  if (!hasEnabled && !hasManual) return json({ ok: false, error: 'enabled, btcAddress or tronAddress required' }, 400);
 
   let enabled = rec.enabled || {};
   if (hasEnabled) {
@@ -40,23 +40,29 @@ export async function onRequestPost({ env, request }) {
     }
   }
 
-  const prevBtc = rec.addresses && rec.addresses.btc;
-  let btc = prevBtc;
-  if (hasBtc) {
-    const v = String(body.btcAddress || '').trim();
-    if (v && !validAddress('btc', v)) {
-      return json({ ok: false, error: 'BTC-адрес должен быть в формате bc1q… (P2WPKH)' }, 400);
+  // Цепочки, которые кошельки не отдают по WalletConnect (BTC — нет namespace bip122, Tron —
+  // нет в CAIP у SafePal): адрес вписывается вручную, проверяется только форма.
+  const MANUAL = { btc: 'btcAddress', tron: 'tronAddress' };
+  const changed = {};
+  for (const [chain, field] of Object.entries(MANUAL)) {
+    if (body[field] === undefined) continue;
+    const v = String(body[field] || '').trim();
+    if (v && !validAddress(chain, v)) {
+      const hint = chain === 'btc' ? 'bc1q… (P2WPKH)' : 'T… (TRC20)';
+      return json({ ok: false, error: `${chain.toUpperCase()}-адрес должен быть в формате ${hint}` }, 400);
     }
-    btc = v || undefined;
-    if (v) rec.addresses.btc = v;
-    else delete rec.addresses.btc;
+    changed[chain] = rec.addresses[chain];
+    if (v) rec.addresses[chain] = v;
+    else delete rec.addresses[chain];
   }
 
   rec.enabled = enabled;
   await saveUser(env, rec);
   // адрес заменили/убрали — старый алиас больше не должен открывать эту запись
-  if (hasBtc && prevBtc && prevBtc !== btc) await env.KV.delete(userKey(prevBtc));
-  return json({ ok: true, enabled, btc: btc || null });
+  for (const [chain, prev] of Object.entries(changed)) {
+    if (prev && prev !== rec.addresses[chain]) await env.KV.delete(userKey(prev));
+  }
+  return json({ ok: true, enabled, btc: rec.addresses.btc || null, tron: rec.addresses.tron || null });
 }
 
 function json(obj, status = 200) {

@@ -32,10 +32,13 @@ function settingsHtml(rec) {
     }
   }
   const btc = (rec.addresses && rec.addresses.btc) || '';
+  const tron = (rec.addresses && rec.addresses.tron) || '';
   return `<details class="settings"><summary>⚙ Настройки</summary><div id="settings">${rows.join('')}
  <div class="btcline"><label for="btc-addr">BTC-адрес (bc1q…)</label>
-  <input id="btc-addr" type="text" inputmode="text" autocomplete="off" spellcheck="false" value="${esc(btc)}" placeholder="bc1q…">
-  <div class="muted">Кошельки не отдают Bitcoin через WalletConnect — адрес вписывается вручную.</div></div>
+  <input id="btc-addr" type="text" inputmode="text" autocomplete="off" spellcheck="false" value="${esc(btc)}" placeholder="bc1q…"></div>
+ <div class="btcline"><label for="tron-addr">Tron-адрес (T…)</label>
+  <input id="tron-addr" type="text" inputmode="text" autocomplete="off" spellcheck="false" value="${esc(tron)}" placeholder="T…"></div>
+ <div class="muted">BTC и Tron не приходят через WalletConnect — эти адреса вписываются вручную.</div>
  <button class="act" id="save-settings">Сохранить</button><div class="muted" id="save-msg"></div></div></details>`;
 }
 
@@ -140,6 +143,8 @@ if (saveBtn) saveBtn.onclick = async () => {
   const payload = { enabled };
   const btcInput = document.getElementById('btc-addr');
   if (btcInput) payload.btcAddress = btcInput.value.trim();
+  const tronInput = document.getElementById('tron-addr');
+  if (tronInput) payload.tronAddress = tronInput.value.trim();
   const msg = document.getElementById('save-msg');
   saveBtn.disabled = true;
   try {

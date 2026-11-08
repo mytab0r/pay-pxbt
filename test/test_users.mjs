@@ -102,6 +102,12 @@ try {
     assert.strictEqual(r.status, 200, 'валидный BTC-адрес принимается');
     const html = await (await req('/u/' + EVM)).text();
     assert.ok(html.includes('bc1qw508'), 'BTC-адрес показан на странице');
+    // Tron так же вручную: WalletConnect его не отдаёт
+    r = await post({ tronAddress: 'not-a-tron' });
+    assert.strictEqual(r.status, 400, 'невалидный Tron-адрес отклоняется');
+    r = await post({ tronAddress: TRON });
+    assert.strictEqual(r.status, 200, 'валидный Tron-адрес принимается');
+    assert.ok((await (await req('/u/' + EVM)).text()).includes(TRON), 'Tron-адрес показан на странице');
   }
 } finally {
   srv.close();

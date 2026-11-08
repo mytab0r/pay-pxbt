@@ -315,7 +315,8 @@ async function claim(chain) {
       ? 'кошелёк не найден — адрес можно добавить вручную в настройках страницы'
       : humanError(e);
     finishRow(d, false, chain + ': ' + text);
-    return { ok: false, nowallet: !!(e && e.nowallet) };
+    // Пользователь сам отменил подключение в кошельке — не выкатываем ещё три запроса подряд.
+    return { ok: false, nowallet: !!(e && e.nowallet), cancelled: !!(e && e.code === 4001 && e.connect) };
   }
 }
 
@@ -331,6 +332,7 @@ btn.onclick = async () => {
       const r = await claim(chain);
       if (r.ok) okCount++;
       else if (r.nowallet) noWalletCount++;
+      if (r.cancelled) break;
     }
   } finally {
     btn.disabled = false;

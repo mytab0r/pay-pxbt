@@ -12,13 +12,18 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
-import { timingSafeEqual } from 'node:crypto';
+import { timingSafeEqual, randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import * as adminPage from '../../functions/admin/index.js';
 import * as adminConfig from '../../functions/api/admin/config.js';
 import * as addressApi from '../../functions/api/address.js';
 import * as claimNonce from '../../functions/api/claim/nonce.js';
 import * as claimVerify from '../../functions/api/claim/verify.js';
+import * as userNonce from '../../functions/api/u/nonce.js';
+import * as userClaim from '../../functions/api/u/claim.js';
+import * as userSettings from '../../functions/api/u/settings.js';
+import * as userMe from '../../functions/api/u/me.js';
+import * as homePage from '../../functions/home/index.js';
 import * as invoiceCreate from '../../functions/api/invoice/create.js';
 import * as invoiceApi from '../../functions/api/invoice/[[id]].js';
 import * as invoicePage from '../../functions/i/[[id]].js';
@@ -130,7 +135,15 @@ export function makeServer({ dataDir, ownerEmail, apiToken, accessTeam, accessAu
   const psFile = path.join(dataDir, 'proxy_auth_secret');
   if (!proxySecret && fs.existsSync(psFile)) proxySecret = fs.readFileSync(psFile, 'utf8').trim();
   const readSecrets = () => (fs.existsSync(secretsFile) ? JSON.parse(fs.readFileSync(secretsFile, 'utf8')) : {});
-  const env = { KV: kv, REOWN_PROJECT_ID: extraEnv.REOWN_PROJECT_ID ?? (readSecrets().reown || {}).project_id ?? process.env.REOWN_PROJECT_ID ?? '' };
+  // секрет подписи cookie pay_owner: env -> $DATA_DIR/session_secret -> сгенерировать и сохранить 600
+  const sessionFile = path.join(dataDir, 'session_secret');
+  let sessionSecret = extraEnv.SESSION_SECRET || process.env.SESSION_SECRET;
+  if (!sessionSecret && fs.existsSync(sessionFile)) sessionSecret = fs.readFileSync(sessionFile, 'utf8').trim();
+  if (!sessionSecret) {
+    sessionSecret = randomBytes(32).toString('hex');
+    writeAtomic(sessionFile, sessionSecret, 0o600);
+  }
+  const env = { KV: kv, SESSION_SECRET: sessionSecret, REOWN_PROJECT_ID: extraEnv.REOWN_PROJECT_ID ?? (readSecrets().reown || {}).project_id ?? process.env.REOWN_PROJECT_ID ?? '' };
   const auth = { team: accessTeam, aud: accessAud, owner: ownerEmail };
 
   async function route(request) {
@@ -140,8 +153,15 @@ export function makeServer({ dataDir, ownerEmail, apiToken, accessTeam, accessAu
     const ctx = (params = {}) => ({ env, request, params });
 
     if (p === '/healthz') return json({ ok: true, sha: process.env.GIT_SHA || 'unknown' });
-    if (p === '/' ) return payPage.onRequestGet(ctx());
+    if (p === '/') return homePage.onRequestGet(ctx());
+    if (p === '/pay') return payPage.onRequestGet(ctx());
     if (p === '/tonconnect-manifest.json' && m === 'GET') return tonManifest.onRequestGet(ctx());
+
+    // публичное: claim-флоу публичной страницы /u/<id> (nonce -> подпись -> запись + cookie)
+    if (p === '/api/u/nonce' && m === 'POST') return userNonce.onRequestPost(ctx());
+    if (p === '/api/u/claim' && m === 'POST') return userClaim.onRequestPost(ctx());
+    if (p === '/api/u/settings' && m === 'POST') return userSettings.onRequestPost(ctx());
+    if (p === '/api/u/me' && m === 'GET') return userMe.onRequestGet(ctx());
 
     // публичное: страница счёта и его API
     let mm;

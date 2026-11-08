@@ -71,7 +71,8 @@ try {
   let r = await req('/api/admin/providers/paypal', { method: 'PUT', headers: owner, body: JSON.stringify({ client_id: 'cid', secret: 'good', mode: 'sandbox' }) });
   assert.strictEqual(r.status, 200);
   const sf = path.join(dir, 'secrets.json');
-  assert.strictEqual(fs.statSync(sf).mode & 0o777, 0o600, 'secrets.json chmod 600');
+  // chmod 600 — POSIX-семантика; на Windows mode не применяется, проверяем только на POSIX
+  if (process.platform !== 'win32') assert.strictEqual(fs.statSync(sf).mode & 0o777, 0o600, 'secrets.json chmod 600');
   assert.strictEqual(JSON.parse(fs.readFileSync(sf, 'utf8')).paypal.secret, 'good');
   pv = await (await req('/api/admin/providers', { headers: owner })).json();
   const vals = pv.find((p) => p.id === 'paypal').values;
@@ -94,11 +95,14 @@ try {
   assert.strictEqual(paypalCalls.at(-1).url, 'https://api-m.paypal.com/v1/oauth2/token');
 
 
-  // root: public page, no secrets leak
+  // /pay: public page (\u0431\u044b\u0432\u0448\u0438\u0439 /), no secrets leak
   {
-    const rootHtml = await (await req('/')).text();
+    const rootHtml = await (await req('/pay')).text();
     assert.match(rootHtml, /\u0420\u0435\u043a\u0432\u0438\u0437\u0438\u0442\u044b/);
-    assert.ok(!rootHtml.includes('good') && !rootHtml.includes('sso-secret-123'), 'secrets not in root');
+    assert.ok(!rootHtml.includes('good') && !rootHtml.includes('sso-secret-123'), 'secrets not in /pay');
+    const landing = await (await req('/')).text();
+    assert.match(landing, /id="connect"/, '/ \u2014 \u043d\u043e\u0432\u044b\u0439 \u043b\u0435\u043d\u0434\u0438\u043d\u0433');
+    assert.ok(!landing.includes('sso-secret-123'), 'secrets not in landing');
   }
 
   // инвойс: создать можно владельцу или по bearer-токену бота, анониму нельзя
@@ -118,9 +122,9 @@ try {
   await req('/api/admin/config', { method: 'PUT', headers: owner, body: JSON.stringify({ pairs: { 'USDT-TRC20': true } }) });
   const inv = await (await req('/api/invoice/' + id)).json();
   assert.deepStrictEqual(inv.pairs.map((p) => p.id), ['USDT-TRC20']);
-  // root deep: tron first, one evm address, btc hidden yet
+  // /pay deep: tron first, one evm address, btc hidden yet
   {
-    const rootHtml = await (await req('/')).text();
+    const rootHtml = await (await req('/pay')).text();
     const tronPos = rootHtml.indexOf('TQrY8try6YCHAEuZGB9puHKiQWy6iRfnCw');
     const ethPos = rootHtml.indexOf('Ethereum (ERC20)');
     assert.ok(tronPos !== -1 && ethPos !== -1 && tronPos < ethPos, 'tron first');
@@ -170,9 +174,9 @@ try {
     j = await (await req('/api/address?chain=ton')).json();
     assert.strictEqual(j.address, 'UQCHG8Sxyw5yJct7cXb2AFAvyPPdAJsF4Sko5Y6F8Rx1AAAA', 'ton from registry');
 
-    // root now shows btc; evm single address across all EVM nets; warning texts
+    // /pay now shows btc; evm single address across all EVM nets; warning texts
     {
-      const rootHtml = await (await req('/')).text();
+      const rootHtml = await (await req('/pay')).text();
       assert.ok(rootHtml.includes('bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080'), 'btc visible after owner put');
       assert.ok(rootHtml.includes('UQCHG8Sxyw5yJct7cXb2AFAvyPPdAJsF4Sko5Y6F8Rx1AAAA'), 'ton visible');
       const evmCount = (rootHtml.match(/"address":"0xabc"/g) || []).length;

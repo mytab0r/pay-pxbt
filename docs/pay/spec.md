@@ -99,3 +99,32 @@ Job `e2e-admin` в `.github/workflows/ci.yml`: собирает образ на 
 `test/test_userpage.mjs` (node, без зависимостей) — 200/404/списки сетей и монет.
 `test/e2e/user.e2e.mjs` — Playwright: модалка по кнопке, смена сети → смена монет, 404, нет горизонтального
 скролла на 375px. Оба гоняются job'ом `ci` (`pay.pxbt.app tests` и `e2e-admin`-образ).
+
+## Публичные страницы: лендинг и /u/<id> (t_user-pages)
+
+- `/` — лендинг: три шага (подключить кошелёк → собрать адреса → получить ссылку `/u/…`) и кнопка
+  `#connect`. Старые реквизиты владельца переехали на `/pay`.
+- Кошельки — только injected-провайдеры (EIP-6963 / `window.ethereum`, TronLink/SafePal, Phantom,
+  Unisat/OKX/Xverse). AppKit/WalletConnect на лендинге не используется: висящая WC-сессия
+  (`hasAnyConnection`) дизейблит кошельки в модалке — это и был баг «кнопки серые».
+- TON — отдельная кнопка `#connect-ton`: TON Connect открывает модалку всегда, в общем потоке он
+  вешал бы страницу до 3 минут у тех, у кого нет TON-кошелька.
+- Claim: `POST /api/u/nonce {chain}` → подпись → `POST /api/u/claim`. Nonce живёт 10 мин,
+  сжигается только после успешной проверки подписи. Ответ — `{ok, id, url}` и cookie
+  `pay_owner=<primary>.<hmac>` (HttpOnly, SameSite=Lax, год).
+- Запись пользователя: `user:<primary>` = `{id, primary, addresses, enabled, createdAt, updatedAt}`;
+  каждый остальной адрес — алиас `user:<addr>` = `{alias:true, primary}`. `enabled` хранит только
+  явные `false`; ключи — `<netId>` и `<netId>:<tokenId>`.
+- `/u/<id>`: если запись есть — все адреса пользователя, отфильтрованные `enabled`; владельцу по
+  cookie показывается блок «⚙ Настройки» (`POST /api/u/settings`). Нет записи — прежнее поведение
+  (адрес как есть, все сети его цепочки).
+- `GET /api/u/me` — запись по cookie (для возвращающегося владельца: лендинг сразу предлагает
+  «Открыть мою страницу»).
+- Секрет cookie: `SESSION_SECRET` из env, иначе `$DATA_DIR/session_secret` (создаётся с правами 600).
+  В Cloudflare Pages секрет нужно задать в env.
+
+### CI
+
+`test/test_users.mjs` — лендинг, `/pay`, запись/алиас, фильтр `enabled`, настройки без и с cookie,
+`/api/u/me`. `test/e2e/user.e2e.mjs` описывает старый лендинг с модалкой и в CI pay-репозитория
+не гоняется — при включении e2e его нужно переписать под injected-провайдеры.

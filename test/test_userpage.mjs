@@ -1,6 +1,6 @@
 /**
  * GET /u/<id> — личная страница оплаты: сети/монеты, 404 на неизвестный id, публичный доступ.
- * Лендинг / — кнопка WalletConnect (без неё страницу нельзя использовать для оплаты из кошелька).
+ * Лендинг / — три шага и кнопка подключения кошелька (claim-флоу).
  * Запуск: node test/test_userpage.mjs
  */
 import assert from 'node:assert';
@@ -24,14 +24,14 @@ const base = LOOP + srv.address().port;
 const req = (p, init) => fetch(base + p, init);
 
 try {
-  // лендинг: кнопка WalletConnect + projectId уходит в HTML (без него кнопка бесполезна)
+  // лендинг: одна кнопка подключения кошелька + три шага
   {
     const r = await req('/');
     assert.strictEqual(r.status, 200);
     const html = await r.text();
-    assert.match(html, /id="wc"/, 'кнопка подключения кошелька есть');
+    assert.match(html, /id="connect"/, 'кнопка подключения кошелька есть');
     assert.match(html, /Подключить кошелёк/);
-    assert.match(html, /const PROJECT_ID = "pid-abc"/, 'projectId из env попадает в страницу');
+    for (const step of ['Шаг 1', 'Шаг 2', 'Шаг 3']) assert.ok(html.includes(step), 'шаг лендинга: ' + step);
   }
   // /u/<tron>: публично (без SSO-заголовка), сети и монета из существующего конфига
   {

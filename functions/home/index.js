@@ -91,7 +91,6 @@ export async function onRequestGet({ env = {} } = {}) {
 <script>
 const CHAINS = ['evm', 'tron', 'solana', 'btc'];
 const PROJECT_ID = ${inline(projectId)};
-const WC_CHAINS = [1, 8453, 56, 137, 42161];
 const NOWALLET_HINT = ${inline(NOWALLET_HINT)};
 const API_TIMEOUT = 15000;
 
@@ -110,6 +109,7 @@ const nonceMsg = (nonce) => 'pay.pxbt.app: claim ' + nonce + '\\nвладеле�
 
 // WalletConnect: бандл лежит на нашем домене, грузим его фоном сразу после отрисовки страницы.
 let wcP = null;
+let wcSessionP = null;
 function loadPayWC() {
   if (wcP) return wcP;
   wcP = new Promise((resolve, reject) => {
@@ -134,22 +134,19 @@ function injectedEvm() {
     setTimeout(() => { window.removeEventListener('eip6963:announceProvider', on); res(first || (window.ethereum ? { provider: window.ethereum } : null)); }, 300);
   });
 }
-async function wcEvm() {
-  if (!PROJECT_ID) throw new Error('WalletConnect не настроен');
-  if (!window.PayWC) hint.textContent = 'Загружаю список кошельков…';
-  const PayWC = await loadPayWC();
-  hint.textContent = '';
-  const p = await PayWC.connect({ projectId: PROJECT_ID, chains: WC_CHAINS });
-  const accs = (p.accounts && p.accounts.length) ? p.accounts : await p.request({ method: 'eth_accounts' });
-  const address = accs && accs[0];
-  if (!address) throw new Error('кошелёк не вернул адрес');
-  return {
-    address,
-    async sign(msg) {
-      try { return await p.request({ method: 'personal_sign', params: [hexUtf8(msg), address] }); }
-      catch (e) { throw Object.assign(new Error('подпись отклонена'), { code: (e && e.code) || 4001 }); }
-    },
-  };
+async function wcSession() {
+  if (!wcSessionP) {
+    wcSessionP = (async () => {
+      if (!PROJECT_ID) throw new Error('WalletConnect не настроен');
+      if (!window.PayWC) hint.textContent = 'Загружаю список кошельков…';
+      const PayWC = await loadPayWC();
+      hint.textContent = '';
+      const s = await PayWC.connect({ projectId: PROJECT_ID });
+      if (!s.evm && !s.solana) throw new Error('кошелёк не отдал ни одного адреса');
+      return s;
+    })().catch((e) => { wcSessionP = null; hint.textContent = ''; throw e; });
+  }
+  return wcSessionP;
 }
 async function evmWallet() {
   const inj = await injectedEvm();
@@ -168,23 +165,29 @@ async function evmWallet() {
       },
     };
   }
-  return wcEvm();
+  const s = await wcSession();
+  if (!s.evm) throw Object.assign(new Error('кошелёк не отдал EVM-адрес'), { nowallet: true });
+  return s.evm;
 }
 async function solanaWallet() {
   const p = (window.phantom && window.phantom.solana) || window.solana;
-  if (!p) throw Object.assign(new Error('кошелёк не найден'), { nowallet: true });
-  let res;
-  try { res = await p.connect(); }
-  catch (e) { throw Object.assign(new Error('подключение отклонено'), { code: (e && e.code) || 4001, connect: true }); }
-  const pk = (res && res.publicKey) || p.publicKey;
-  if (!pk) throw new Error('кошелёк не вернул адрес');
-  return {
-    address: pk.toString(),
-    async sign(msg) {
-      const s = await p.signMessage(new TextEncoder().encode(msg), 'utf8');
-      return btoa(String.fromCharCode(...(s.signature || s)));
-    },
-  };
+  if (p) {
+    let res;
+    try { res = await p.connect(); }
+    catch (e) { throw Object.assign(new Error('подключение отклонено'), { code: (e && e.code) || 4001, connect: true }); }
+    const pk = (res && res.publicKey) || p.publicKey;
+    if (!pk) throw new Error('кошелёк не вернул адрес');
+    return {
+      address: pk.toString(),
+      async sign(msg) {
+        const s = await p.signMessage(new TextEncoder().encode(msg), 'utf8');
+        return btoa(String.fromCharCode(...(s.signature || s)));
+      },
+    };
+  }
+  const s = await wcSession();
+  if (!s.solana) throw Object.assign(new Error('кошелёк не отдал Solana-адрес'), { nowallet: true });
+  return s.solana;
 }
 async function tronWallet() {
   const p = window.tron || window.tronLink || (window.tronWeb ? { tronWeb: window.tronWeb } : null);

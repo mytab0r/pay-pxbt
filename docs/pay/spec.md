@@ -111,11 +111,17 @@ Job `e2e-admin` в `.github/workflows/ci.yml`: собирает образ на 
 - EVM: сначала injected-провайдер (EIP-6963 / `window.ethereum` — расширение на десктопе, dApp-браузер
   кошелька). Если его нет — WalletConnect: модалка со списком приложений (SafePal, MetaMask, Trust…),
   выбор открывает кошелёк по deep link.
-- Бандл WalletConnect собирается из `web/` (esbuild, `@walletconnect/ethereum-provider`) и отдаётся
-  с нашего домена как `/assets/paywc.js`. esm.sh в рантайме не используется: у части провайдеров
-  `import()` падал с `Failed to fetch dynamically imported module`, и кнопка подключения умирала.
-  Скрипт подгружается фоном после отрисовки страницы; клик дожидается его, если не успел.
-- Tron/Solana/BTC — только injected-провайдеры (TronLink/SafePal, Phantom, Unisat/OKX/Xverse).
+- Бандл WalletConnect собирается из `web/` (esbuild, `@walletconnect/universal-provider` +
+  `@walletconnect/modal`) и отдаётся с нашего домена как `/assets/paywc.js`. esm.sh в рантайме
+  не используется: у части провайдеров `import()` падал с `Failed to fetch dynamically imported
+  module`, и кнопка подключения умирала. Скрипт подгружается фоном после отрисовки страницы.
+- Одна WC-сессия несёт `eip155` (обязательный) и `solana` (optional) — SafePal отдаёт оба адреса
+  из одного подключения; EVM-only кошельки (MetaMask) подключаются без Solana.
+- Bitcoin (`bip122`) и Tron кошельки через WalletConnect не отдают: у SafePal в реестре WC только
+  eip155/cosmos/polkadot/solana/stellar/ton, Tron в CAIP-сетях отсутствует. Эти адреса владелец
+  вписывает вручную в «⚙ Настройки» (`btcAddress`, `tronAddress`), сервер проверяет форму.
+- Solana/Tron/BTC через injected-провайдеры (Phantom, TronLink/SafePal, Unisat/OKX/Xverse) —
+  если страница открыта в dApp-браузере кошелька, они подхватываются автоматически.
 - TON — отдельная кнопка `#connect-ton`: TON Connect открывает модалку всегда, в общем потоке он
   вешал бы страницу до 3 минут у тех, у кого нет TON-кошелька.
 - Claim: `POST /api/u/nonce {chain}` → подпись → `POST /api/u/claim`. Nonce живёт 10 мин,

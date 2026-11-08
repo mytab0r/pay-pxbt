@@ -1,0 +1,15 @@
+{
+  "name": "pay-web",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "esbuild entry.js --bundle --format=iife --minify --outfile=../deploy/pay-page/public/paywc.js"
+  },
+  "dependencies": {
+    "@walletconnect/ethereum-provider": "2.26.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}

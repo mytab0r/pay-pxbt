@@ -15,7 +15,9 @@ def test_inputs_cover_dockerfile_copy():
     m = re.search(r'IMAGE_INPUTS: "([^"]+)"', WF)
     assert m, "image.yml: нет IMAGE_INPUTS в stale guard"
     pre = tuple(m.group(1).split())
-    srcs = [l.split()[1] for l in DF.splitlines() if l.startswith(("COPY ", "ADD "))]
+    # COPY --from=<stage> берёт файл из предыдущего stage, а не из контекста сборки
+    srcs = [l.split()[1] for l in DF.splitlines()
+            if l.startswith(("COPY ", "ADD ")) and "--from=" not in l]
     assert srcs, "Dockerfile без COPY — тест устарел"
     miss = [s for s in srcs if not (s.rstrip("/") + "/").startswith(pre) and not s.startswith(pre)]
     assert not miss, f"Dockerfile копирует пути вне IMAGE_INPUTS: {miss}"

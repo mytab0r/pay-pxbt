@@ -39,7 +39,7 @@ jobs:
         env:
           BRANCH: ${{ github.event.workflow_run.head_branch }}
           GH_TOKEN: ${{ github.token }}
-          IMAGE_INPUTS: "deploy/pay-page/ functions/ config/payment-providers.json"
+          IMAGE_INPUTS: "deploy/pay-page/ functions/ config/payment-providers.json web/"
         run: |
           if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then echo "ok=true" >> "$GITHUB_OUTPUT"; echo "workflow_dispatch: guard пропущен, собираю $SHA"; exit 0; fi
           if [ "$GITHUB_EVENT_NAME" = push ]; then echo "ok=true" >> "$GITHUB_OUTPUT"; echo "push-path: guard пропущен, head_sha == HEAD"; exit 0; fi

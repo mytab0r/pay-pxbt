@@ -67,6 +67,7 @@ export async function onRequestGet({ env = {} } = {}) {
  <h1>Принимайте переводы <span>одной ссылкой</span></h1>
  <p>Подключите кошелёк — получите личную страницу с вашими адресами и QR во всех поддерживаемых сетях. Без регистрации и без сервера.</p>
  <button class="cta" id="connect">Подключить кошелёк</button>
+ <div class="sub">или <button id="connect-wc">выбрать приложение через WalletConnect</button></div>
  <div class="sub">или <button id="connect-ton">добавить TON-кошелёк</button></div>
  <div id="progress"></div>
  <div id="hint"></div>
@@ -157,7 +158,7 @@ async function wcSession() {
   return wcSessionP;
 }
 async function evmWallet() {
-  const inj = await injectedEvm();
+  const inj = forceWc ? null : await injectedEvm();
   if (inj) {
     const p = inj.provider;
     let accs;
@@ -178,7 +179,7 @@ async function evmWallet() {
   return s.evm;
 }
 async function solanaWallet() {
-  const p = (window.phantom && window.phantom.solana) || window.solana;
+  const p = forceWc ? null : ((window.phantom && window.phantom.solana) || window.solana);
   if (p) {
     let res;
     try { res = await p.connect(); }
@@ -266,6 +267,8 @@ const tonBtn = document.getElementById('connect-ton');
 const progress = document.getElementById('progress');
 const hint = document.getElementById('hint');
 let myUrl = null;
+// true — не трогаем расширения и идём строго в WalletConnect (выбор приложения)
+let forceWc = false;
 
 const short = (a) => (a && a.length > 16 ? a.slice(0, 8) + '…' + a.slice(-6) : a);
 function addRow(chain) {
@@ -347,6 +350,13 @@ tonBtn.onclick = async () => {
   const r = await claim('ton');
   tonBtn.disabled = false;
   if (r.ok) tonBtn.textContent = 'TON добавлен';
+};
+
+// Всегда доступный путь: даже если в браузере стоит расширение-кошелёк, можно выбрать
+// приложение (SafePal и другие) через WalletConnect — как в привычных dApp.
+document.getElementById('connect-wc').onclick = () => {
+  forceWc = true;
+  btn.click();
 };
 
 fetch('/api/u/me').then((r) => (r.ok ? r.json() : null)).then((j) => {

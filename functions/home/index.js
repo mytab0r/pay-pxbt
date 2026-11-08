@@ -8,7 +8,8 @@
 const NOWALLET_HINT = 'Кошелёк не найден. Откройте эту страницу в браузере кошелька (например, SafePal → Discover) и нажмите «Подключить кошелёк».';
 const inline = (v) => JSON.stringify(v).replace(/</g, '\\u003c');
 
-export async function onRequestGet() {
+export async function onRequestGet({ env = {} } = {}) {
+  const projectId = env.REOWN_PROJECT_ID || '';
   const html = `<!doctype html>
 <html lang="ru"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -69,15 +70,52 @@ function injectedEvm() {
     setTimeout(() => { window.removeEventListener('eip6963:announceProvider', on); res(first || (window.ethereum ? { provider: window.ethereum } : null)); }, 300);
   });
 }
-async function evmWallet() {
-  const inj = await injectedEvm();
-  if (!inj) throw Object.assign(new Error('кошелёк не найден'), { nowallet: true });
-  const p = inj.provider;
-  let accs;
-  try { accs = await p.request({ method: 'eth_requestAccounts' }); }
-  catch (e) { throw Object.assign(new Error('подключение отклонено'), { code: 4001, connect: true }); }
-  const address = accs && accs[0];
-  if (!address) throw new Error('кошелёк не вернул адрес');
+// EVM: сначала injected-провайдер (расширение на десктопе или dApp-браузер кошелька).
+// Если его нет — WalletConnect (AppKit): список приложений, выбор SafePal/MetaMask и т.д.
+// Модули AppKit грузятся с esm.sh ~30 с, поэтому предзагружаем их сразу при открытии страницы:
+// иначе кнопка полминуты выглядит «мёртвой» — это и было жалобой владельца.
+const APPKIT_NETS = [
+  { id: 1, name: 'Ethereum', nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 }, rpcUrls: { default: { http: ['https://eth.llamarpc.com'] } } },
+  { id: 8453, name: 'Base', nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 }, rpcUrls: { default: { http: ['https://mainnet.base.org'] } } },
+];
+const PROJECT_ID = ${inline(projectId)};
+let appkitMods = null, appkitModal = null;
+function preloadAppkit() {
+  if (appkitMods || !PROJECT_ID) return;
+  appkitMods = Promise.all([
+    import('https://esm.sh/@reown/appkit@1.7.18'),
+    import('https://esm.sh/@reown/appkit-adapter-wagmi@1.7.18'),
+  ]).catch((e) => { appkitMods = null; throw e; });
+}
+preloadAppkit();
+async function getAppkitModal() {
+  if (appkitModal) return appkitModal;
+  if (!PROJECT_ID) throw new Error('WalletConnect не настроен (нет projectId)');
+  preloadAppkit();
+  const [{ createAppKit }, { WagmiAdapter }] = await appkitMods;
+  const wagmiAdapter = new WagmiAdapter({ networks: APPKIT_NETS, projectId: PROJECT_ID });
+  appkitModal = createAppKit({ adapters: [wagmiAdapter], networks: APPKIT_NETS, projectId: PROJECT_ID, features: { analytics: false, email: false, socials: false, swaps: false, onramp: false } });
+  return appkitModal;
+}
+async function walletConnectEvm() {
+  if (!appkitModal) hint.textContent = 'Загружаю список кошельков…';
+  const modal = await getAppkitModal();
+  hint.textContent = '';
+  const addr = () => { try { const a = modal.getAccount('eip155'); return a && a.isConnected && a.address; } catch (e) { return null; } };
+  if (!addr()) {
+    // Висящая WC-сессия без аккаунта дизейблит кошельки в модалке (AppKit: hasAnyConnection). Сбрасываем.
+    try { await modal.disconnect(); } catch (e) {}
+    await modal.open();
+    for (let t = 0; !addr(); t += 500) {
+      if (!modal.getState().open) throw Object.assign(new Error('подключение отклонено'), { code: 4001, connect: true });
+      if (t > 180000) throw Object.assign(new Error('подключение отклонено'), { code: 4001, connect: true });
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    try { await modal.close(); } catch (e) {}
+  }
+  const p = modal.getWalletProvider();
+  if (!p) throw new Error('WalletConnect: провайдер не получен');
+  const address = addr();
   return {
     address,
     async sign(msg) {
@@ -85,6 +123,25 @@ async function evmWallet() {
       catch (e) { throw Object.assign(new Error('подпись отклонена'), { code: (e && e.code) || 4001 }); }
     },
   };
+}
+async function evmWallet() {
+  const inj = await injectedEvm();
+  if (inj) {
+    const p = inj.provider;
+    let accs;
+    try { accs = await p.request({ method: 'eth_requestAccounts' }); }
+    catch (e) { throw Object.assign(new Error('подключение отклонено'), { code: 4001, connect: true }); }
+    const address = accs && accs[0];
+    if (!address) throw new Error('кошелёк не вернул адрес');
+    return {
+      address,
+      async sign(msg) {
+        try { return await p.request({ method: 'personal_sign', params: [hexUtf8(msg), address] }); }
+        catch (e) { throw Object.assign(new Error('подпись отклонена'), { code: (e && e.code) || 4001 }); }
+      },
+    };
+  }
+  return walletConnectEvm();
 }
 
 // Solana: window-провайдер (SafePal/Phantom в dApp-браузере, расширение на десктопе)

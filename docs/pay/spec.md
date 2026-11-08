@@ -104,9 +104,13 @@ Job `e2e-admin` в `.github/workflows/ci.yml`: собирает образ на 
 
 - `/` — лендинг: три шага (подключить кошелёк → собрать адреса → получить ссылку `/u/…`) и кнопка
   `#connect`. Старые реквизиты владельца переехали на `/pay`.
-- Кошельки — только injected-провайдеры (EIP-6963 / `window.ethereum`, TronLink/SafePal, Phantom,
-  Unisat/OKX/Xverse). AppKit/WalletConnect на лендинге не используется: висящая WC-сессия
-  (`hasAnyConnection`) дизейблит кошельки в модалке — это и был баг «кнопки серые».
+- EVM: сначала injected-провайдер (EIP-6963 / `window.ethereum` — расширение на десктопе, dApp-браузер
+  кошелька). Если его нет (обычный мобильный браузер) — WalletConnect (AppKit): модалка со списком
+  приложений, выбор SafePal/MetaMask и т.д. Модули AppKit грузятся с esm.sh ~30 с, поэтому стартуют
+  при открытии страницы, а не по клику: иначе кнопка полминуты выглядит «мёртвой».
+  Перед `open()` модалка делает `disconnect()` — висящая WC-сессия (`hasAnyConnection`) дизейблит
+  кошельки в списке.
+- Tron/Solana/BTC — только injected-провайдеры (TronLink/SafePal, Phantom, Unisat/OKX/Xverse).
 - TON — отдельная кнопка `#connect-ton`: TON Connect открывает модалку всегда, в общем потоке он
   вешал бы страницу до 3 минут у тех, у кого нет TON-кошелька.
 - Claim: `POST /api/u/nonce {chain}` → подпись → `POST /api/u/claim`. Nonce живёт 10 мин,

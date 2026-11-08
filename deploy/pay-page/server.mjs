@@ -154,7 +154,8 @@ export function makeServer({ dataDir, ownerEmail, apiToken, accessTeam, accessAu
     sessionSecret = randomBytes(32).toString('hex');
     writeAtomic(sessionFile, sessionSecret, 0o600);
   }
-  const env = { KV: kv, SESSION_SECRET: sessionSecret, REOWN_PROJECT_ID: extraEnv.REOWN_PROJECT_ID ?? (readSecrets().reown || {}).project_id ?? process.env.REOWN_PROJECT_ID ?? '' };
+  // ASSET_VERSION уходит в URL /assets/paywc.js?v=…: без него Cloudflare держит старый бандл час
+  const env = { KV: kv, SESSION_SECRET: sessionSecret, ASSET_VERSION: process.env.GIT_SHA || '', REOWN_PROJECT_ID: extraEnv.REOWN_PROJECT_ID ?? (readSecrets().reown || {}).project_id ?? process.env.REOWN_PROJECT_ID ?? '' };
   const auth = { team: accessTeam, aud: accessAud, owner: ownerEmail };
 
   async function route(request) {

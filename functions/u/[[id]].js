@@ -31,7 +31,12 @@ function settingsHtml(rec) {
       rows.push(`<label class="chk sub"><input type="checkbox" data-key="${esc(key)}"${isEnabled(rec, key) ? ' checked' : ''}>${esc(t.label)}</label>`);
     }
   }
-  return `<details class="settings"><summary>⚙ Настройки</summary><div id="settings">${rows.join('')}<button class="act" id="save-settings">Сохранить</button><div class="muted" id="save-msg"></div></div></details>`;
+  const btc = (rec.addresses && rec.addresses.btc) || '';
+  return `<details class="settings"><summary>⚙ Настройки</summary><div id="settings">${rows.join('')}
+ <div class="btcline"><label for="btc-addr">BTC-адрес (bc1q…)</label>
+  <input id="btc-addr" type="text" inputmode="text" autocomplete="off" spellcheck="false" value="${esc(btc)}" placeholder="bc1q…">
+  <div class="muted">Кошельки не отдают Bitcoin через WalletConnect — адрес вписывается вручную.</div></div>
+ <button class="act" id="save-settings">Сохранить</button><div class="muted" id="save-msg"></div></div></details>`;
 }
 
 /**
@@ -62,6 +67,9 @@ export function renderPaymentPage({ nets, short, subtitle, settings = '' }) {
  .chk{display:block;margin:8px 0;font-size:14px}
  .chk.sub{margin-left:22px;color:#c9ceda}
  .chk input{transform:scale(1.2);margin-right:8px}
+ .btcline{margin:14px 0 4px;font-size:14px}
+ .btcline label{display:block;margin-bottom:6px}
+ .btcline input{width:100%;padding:10px;border-radius:8px;border:1px solid #2a2f3a;background:#10131a;color:#e6e6e6;font-family:monospace;font-size:13px}
 </style></head><body>
 <div class="card"><h1>Оплата</h1>
 <div class="muted">${esc(subtitle || ('Получатель ' + short))} · выберите сеть — покажу адрес и QR.</div>
@@ -129,10 +137,13 @@ const saveBtn = document.getElementById('save-settings');
 if (saveBtn) saveBtn.onclick = async () => {
   const enabled = {};
   for (const cb of document.querySelectorAll('#settings input[data-key]')) enabled[cb.dataset.key] = cb.checked;
+  const payload = { enabled };
+  const btcInput = document.getElementById('btc-addr');
+  if (btcInput) payload.btcAddress = btcInput.value.trim();
   const msg = document.getElementById('save-msg');
   saveBtn.disabled = true;
   try {
-    const r = await fetch('/api/u/settings', { method: 'POST', headers: {'content-type':'application/json'}, body: JSON.stringify({ enabled }) });
+    const r = await fetch('/api/u/settings', { method: 'POST', headers: {'content-type':'application/json'}, body: JSON.stringify(payload) });
     const j = await r.json().catch(() => ({}));
     if (r.ok && j.ok) location.reload();
     else msg.textContent = j.error || 'ошибка сохранения';

@@ -5,6 +5,9 @@
  *
  * window.PayWC.connect({ projectId, chains }) -> EIP-1193 provider с уже открытой сессией.
  * Модалка со списком кошельков (SafePal, MetaMask, Trust…) — часть бандла, showQrModal.
+ *
+ * Bitcoin сюда не входит: у SafePal и большинства кошельков в WalletConnect нет namespace
+ * bip122, поэтому BTC-адрес на странице задаётся вручную в настройках.
  */
 import { EthereumProvider } from '@walletconnect/ethereum-provider';
 

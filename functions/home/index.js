@@ -299,7 +299,11 @@ async function claim(chain) {
     if (!myUrl) { myUrl = j.url; btn.textContent = 'Открыть мою страницу'; }
     return { ok: true };
   } catch (e) {
-    finishRow(d, false, chain + ': ' + humanError(e));
+    // BTC кошельки через WalletConnect не отдают (нет namespace bip122) — путь один: вписать адрес вручную.
+    const text = chain === 'btc' && e && e.nowallet
+      ? 'кошелёк не найден — адрес можно добавить вручную в настройках страницы'
+      : humanError(e);
+    finishRow(d, false, chain + ': ' + text);
     return { ok: false, nowallet: !!(e && e.nowallet) };
   }
 }

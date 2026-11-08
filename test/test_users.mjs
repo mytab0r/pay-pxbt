@@ -93,6 +93,16 @@ try {
     r = await req('/api/u/settings', { method: 'POST', headers: { 'content-type': 'application/json', cookie: 'pay_owner=' + cookie }, body: JSON.stringify({ enabled: { tron: 'yes' } }) });
     assert.strictEqual(r.status, 400, 'значение не boolean');
   }
+  // BTC вручную: кошельки не отдают его по WalletConnect, поэтому адрес вписывается в настройках
+  {
+    const post = (body) => req('/api/u/settings', { method: 'POST', headers: { 'content-type': 'application/json', cookie: 'pay_owner=' + cookie }, body: JSON.stringify(body) });
+    let r = await post({ btcAddress: 'not-a-btc' });
+    assert.strictEqual(r.status, 400, 'невалидный BTC-адрес отклоняется');
+    r = await post({ btcAddress: 'bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080' });
+    assert.strictEqual(r.status, 200, 'валидный BTC-адрес принимается');
+    const html = await (await req('/u/' + EVM)).text();
+    assert.ok(html.includes('bc1qw508'), 'BTC-адрес показан на странице');
+  }
 } finally {
   srv.close();
   fs.rmSync(dir, { recursive: true, force: true });

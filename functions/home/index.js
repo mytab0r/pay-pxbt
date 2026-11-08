@@ -67,14 +67,13 @@ export async function onRequestGet({ env = {} } = {}) {
  <h1>Принимайте переводы <span>одной ссылкой</span></h1>
  <p>Подключите кошелёк — получите личную страницу с вашими адресами и QR во всех поддерживаемых сетях. Без регистрации и без сервера.</p>
  <button class="cta" id="connect">Подключить кошелёк</button>
- <div class="sub">или <button id="connect-wc">выбрать приложение через WalletConnect</button></div>
  <div class="sub">или <button id="connect-ton">добавить TON-кошелёк</button></div>
  <div id="progress"></div>
  <div id="hint"></div>
 </section>
 
 <section class="grid">
- <div class="step"><b>Шаг 1</b><h3>Подключите кошелёк</h3><p>Расширение в браузере или приложение через WalletConnect — SafePal, MetaMask, Trust и другие.</p></div>
+ <div class="step"><b>Шаг 1</b><h3>Подключите кошелёк</h3><p>Приложение через WalletConnect — SafePal, MetaMask, Trust и другие.</p></div>
  <div class="step"><b>Шаг 2</b><h3>Мы соберём адреса</h3><p>Адрес один на все EVM-сети, плюс отдельные для Tron, Solana, Bitcoin и TON — если такие кошельки подключены.</p></div>
  <div class="step"><b>Шаг 3</b><h3>Отправьте ссылку</h3><p>Любой откроет <code>/u/…</code>, выберет сеть и монету, скопирует адрес или отсканирует QR. Сети и монеты настраиваются.</p></div>
 </section>
@@ -107,7 +106,6 @@ const api = async (url, body) => {
   } catch (e) { throw Object.assign(new Error('сеть недоступна'), { net: true }); }
   finally { clearTimeout(t); }
 };
-const hexUtf8 = (s) => '0x' + Array.from(new TextEncoder().encode(s), (b) => b.toString(16).padStart(2, '0')).join('');
 const rejected = (e) => e && (e.code === 4001 || /declined|reject|denied|cancel/i.test(String((e && e.message) || e)));
 const nonceMsg = (nonce) => 'pay.pxbt.app: claim ' + nonce + '\\nвладелец pxbt.app';
 // Кошелёк может не ответить вовсе (зависшее расширение, закрытая вкладка) — не держим кнопку вечно.
@@ -134,15 +132,6 @@ function loadPayWC() {
 if ('requestIdleCallback' in window) requestIdleCallback(() => loadPayWC().catch(() => {}));
 else setTimeout(() => loadPayWC().catch(() => {}), 800);
 
-function injectedEvm() {
-  return new Promise((res) => {
-    let first = null;
-    const on = (ev) => { if (!first && ev.detail && ev.detail.provider) first = ev.detail; };
-    window.addEventListener('eip6963:announceProvider', on);
-    window.dispatchEvent(new Event('eip6963:requestProvider'));
-    setTimeout(() => { window.removeEventListener('eip6963:announceProvider', on); res(first || (window.ethereum ? { provider: window.ethereum } : null)); }, 300);
-  });
-}
 async function wcSession() {
   if (!wcSessionP) {
     wcSessionP = (async () => {
@@ -158,42 +147,11 @@ async function wcSession() {
   return wcSessionP;
 }
 async function evmWallet() {
-  const inj = forceWc ? null : await injectedEvm();
-  if (inj) {
-    const p = inj.provider;
-    let accs;
-    try { accs = await p.request({ method: 'eth_requestAccounts' }); }
-    catch (e) { throw Object.assign(new Error('подключение отклонено'), { code: 4001, connect: true }); }
-    const address = accs && accs[0];
-    if (!address) throw new Error('кошелёк не вернул адрес');
-    return {
-      address,
-      async sign(msg) {
-        try { return await p.request({ method: 'personal_sign', params: [hexUtf8(msg), address] }); }
-        catch (e) { throw Object.assign(new Error('подпись отклонена'), { code: (e && e.code) || 4001 }); }
-      },
-    };
-  }
   const s = await wcSession();
   if (!s.evm) throw Object.assign(new Error('кошелёк не отдал EVM-адрес'), { nowallet: true });
   return s.evm;
 }
 async function solanaWallet() {
-  const p = forceWc ? null : ((window.phantom && window.phantom.solana) || window.solana);
-  if (p) {
-    let res;
-    try { res = await p.connect(); }
-    catch (e) { throw Object.assign(new Error('подключение отклонено'), { code: (e && e.code) || 4001, connect: true }); }
-    const pk = (res && res.publicKey) || p.publicKey;
-    if (!pk) throw new Error('кошелёк не вернул адрес');
-    return {
-      address: pk.toString(),
-      async sign(msg) {
-        const s = await p.signMessage(new TextEncoder().encode(msg), 'utf8');
-        return btoa(String.fromCharCode(...(s.signature || s)));
-      },
-    };
-  }
   const s = await wcSession();
   if (!s.solana) throw Object.assign(new Error('кошелёк не отдал Solana-адрес'), { nowallet: true });
   return s.solana;
@@ -267,8 +225,6 @@ const tonBtn = document.getElementById('connect-ton');
 const progress = document.getElementById('progress');
 const hint = document.getElementById('hint');
 let myUrl = null;
-// true — не трогаем расширения и идём строго в WalletConnect (выбор приложения)
-let forceWc = false;
 
 const short = (a) => (a && a.length > 16 ? a.slice(0, 8) + '…' + a.slice(-6) : a);
 function addRow(chain) {
@@ -335,14 +291,16 @@ btn.onclick = async () => {
       const r = await claim(chain);
       if (r.ok) okCount++;
       else if (r.nowallet) noWalletCount++;
-      if (r.cancelled) break;
+      // Отмена в кошельке обрывает перебор, только если ещё ничего не подключено:
+      // после успешного EVM отказ Tron не должен мешать остальным.
+      if (r.cancelled && !okCount) break;
     }
   } finally {
     btn.disabled = false;
     btn.textContent = myUrl ? 'Открыть мою страницу' : 'Подключить кошелёк';
   }
+  if (myUrl) { location.href = myUrl; return; }
   if (!okCount && noWalletCount === CHAINS.length) hint.textContent = NOWALLET_HINT;
-  else if (okCount) hint.textContent = 'Готово: адреса сохранены. Откройте свою страницу и выберите сети и монеты.';
 };
 
 tonBtn.onclick = async () => {
@@ -350,13 +308,6 @@ tonBtn.onclick = async () => {
   const r = await claim('ton');
   tonBtn.disabled = false;
   if (r.ok) tonBtn.textContent = 'TON добавлен';
-};
-
-// Всегда доступный путь: даже если в браузере стоит расширение-кошелёк, можно выбрать
-// приложение (SafePal и другие) через WalletConnect — как в привычных dApp.
-document.getElementById('connect-wc').onclick = () => {
-  forceWc = true;
-  btn.click();
 };
 
 fetch('/api/u/me').then((r) => (r.ok ? r.json() : null)).then((j) => {

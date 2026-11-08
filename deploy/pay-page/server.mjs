@@ -60,6 +60,17 @@ class FileKV {
 const json = (obj, status = 200) => new Response(JSON.stringify(obj), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
 const b64u = (s) => Buffer.from(s, 'base64url');
 
+const PUBLIC_DIR = path.join(here, 'public');
+const MIME = { '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml', '.css': 'text/css; charset=utf-8', '.png': 'image/png', '.json': 'application/json' };
+/** Статика сборки (web/ -> esbuild): бандл WalletConnect и иконка. Имя уже ограничено regex'ом в роуте. */
+function staticFile(name) {
+  const file = path.join(PUBLIC_DIR, name);
+  if (!file.startsWith(PUBLIC_DIR) || !fs.existsSync(file)) return new Response('not found', { status: 404 });
+  return new Response(fs.readFileSync(file), {
+    headers: { 'content-type': MIME[path.extname(name)] || 'application/octet-stream', 'cache-control': 'public, max-age=3600' },
+  });
+}
+
 let certCache = { at: 0, keys: [] };
 /** Cloudflare Access JWT -> email владельца или null. */
 async function accessEmail(request, { team, aud, owner }) {
@@ -155,6 +166,10 @@ export function makeServer({ dataDir, ownerEmail, apiToken, accessTeam, accessAu
     if (p === '/healthz') return json({ ok: true, sha: process.env.GIT_SHA || 'unknown' });
     if (p === '/') return homePage.onRequestGet(ctx());
     if (p === '/pay') return payPage.onRequestGet(ctx());
+    if (p === '/favicon.svg') return staticFile('favicon.svg');
+    // собранный бандл WalletConnect (web/ -> esbuild): свой домен вместо esm.sh в рантайме
+    const sm = p.match(/^\/assets\/([a-z0-9._-]{1,64})$/);
+    if (sm && m === 'GET') return staticFile(sm[1]);
     if (p === '/tonconnect-manifest.json' && m === 'GET') return tonManifest.onRequestGet(ctx());
 
     // публичное: claim-флоу публичной страницы /u/<id> (nonce -> подпись -> запись + cookie)

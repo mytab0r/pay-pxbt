@@ -5,10 +5,10 @@
  * Записи нет — прежнее поведение: id = адрес, все сети его цепочки.
  * Владелец (валидная cookie pay_owner) видит блок «⚙ Настройки» с чекбоксами сетей и токенов.
  * Неизвестный/битый id -> HTML 404 (не пустой экран, не 500).
- * Сети и монеты — из существующих NETWORKS + EVM_TOKENS (functions/pay/index.js), не хардкод здесь.
+ * Сети и монеты — из lib/networks.js, не хардкод здесь.
  */
 import { validAddress } from '../lib/config.js';
-import { NETWORKS, EVM_TOKENS } from '../pay/index.js';
+import { networksFor } from '../lib/networks.js';
 import { loadUser, userNetworks, isEnabled, userFromRequest } from '../lib/users.js';
 
 const QR_JS = 'https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js';
@@ -20,20 +20,6 @@ const inline = (v) => JSON.stringify(v).replace(/</g, '\\u003c');
 const BASE_CSS = `body{font-family:system-ui,sans-serif;max-width:520px;margin:0 auto;padding:16px;background:#0f1115;color:#e6e6e6}
  .card{background:#171a21;border-radius:12px;padding:20px;margin-top:16px}
  .muted{color:#8a92a3;font-size:13px} h1{font-size:20px;margin:0 0 6px} a{color:#4f8cff}`;
-
-/** Сети для адреса этой цепочки: EVM-адрес один на все EVM-сети, остальные работают только в своей. */
-export function networksFor(chain) {
-  const out = [];
-  for (const n of NETWORKS) {
-    if (chain === 'evm') {
-      if (!n.evm) continue;
-      const sub = n.id.split(':')[1];
-      const tokens = EVM_TOKENS.map((t) => ({ id: t.id, label: t.label, contract: t.contracts[sub] })).filter((t) => t.contract);
-      if (tokens.length) out.push({ id: n.id, label: n.label, net: n.net, warn: n.warn, tokens });
-    } else if (n.id === chain) out.push({ id: n.id, label: n.label, net: n.net, warn: n.warn });
-  }
-  return out;
-}
 
 /** Чекбоксы владельца: все сети/токены пользователя, отмечено по enabled. */
 function settingsHtml(rec) {
@@ -48,33 +34,16 @@ function settingsHtml(rec) {
   return `<details class="settings"><summary>⚙ Настройки</summary><div id="settings">${rows.join('')}<button class="act" id="save-settings">Сохранить</button><div class="muted" id="save-msg"></div></div></details>`;
 }
 
-export async function onRequestGet({ params, request, env = {} }) {
-  const id = String((params && params.id) || '');
-  const rec = await loadUser(env, id);
-  let nets = [];
-  if (rec) {
-    for (const n of userNetworks(rec)) {
-      if (!isEnabled(rec, n.id)) continue;
-      if (n.tokens) {
-        const tokens = n.tokens.filter((t) => isEnabled(rec, n.id + ':' + t.id));
-        if (!tokens.length) continue;
-        nets.push({ ...n, tokens });
-      } else {
-        nets.push(n);
-      }
-    }
-  } else {
-    const chain = CHAINS.find((c) => validAddress(c, id));
-    nets = chain ? networksFor(chain).map((n) => ({ ...n, address: id })) : [];
-    if (!nets.length) return notFound();
-  }
-  const owner = await userFromRequest(env, request);
-  const isOwner = !!(rec && owner && owner.primary === rec.primary);
-  const short = id.length > 16 ? id.slice(0, 8) + '…' + id.slice(-6) : id;
+/**
+ * Одна страница оплаты для /u/<id> и /pay: сверху выбор сети (для EVM — ещё и монеты),
+ * ниже — только реквизиты выбранного варианта. Все сети карточками не вываливаем.
+ */
+export function renderPaymentPage({ nets, short, subtitle, settings = '' }) {
   const html = `<!doctype html>
 <html lang="ru"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Оплата на ${esc(short)}</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <script src="${QR_JS}"></scr` + `ipt>
 <style>${BASE_CSS}
  .opt{display:block;width:100%;margin:8px 0;padding:14px;border:1px solid #2a2f3a;border-radius:10px;background:#1c2029;color:#e6e6e6;font-size:16px;text-align:left;cursor:pointer}
@@ -95,8 +64,8 @@ export async function onRequestGet({ params, request, env = {} }) {
  .chk input{transform:scale(1.2);margin-right:8px}
 </style></head><body>
 <div class="card"><h1>Оплата</h1>
-<div class="muted">Получатель ${esc(short)} · выберите сеть — покажу адрес и QR.</div>
-${isOwner ? settingsHtml(rec) : ''}</div>
+<div class="muted">${esc(subtitle || ('Получатель ' + short))} · выберите сеть — покажу адрес и QR.</div>
+${settings}</div>
 <div class="card">
  <div id="opts"></div>
  <div id="details" class="hidden">
@@ -176,6 +145,32 @@ if (saveBtn) saveBtn.onclick = async () => {
   return new Response(html, { headers: { 'content-type': 'text/html; charset=utf-8' } });
 }
 
+export async function onRequestGet({ params, request, env = {} }) {
+  const id = String((params && params.id) || '');
+  const rec = await loadUser(env, id);
+  let nets = [];
+  if (rec) {
+    for (const n of userNetworks(rec)) {
+      if (!isEnabled(rec, n.id)) continue;
+      if (n.tokens) {
+        const tokens = n.tokens.filter((t) => isEnabled(rec, n.id + ':' + t.id));
+        if (!tokens.length) continue;
+        nets.push({ ...n, tokens });
+      } else {
+        nets.push(n);
+      }
+    }
+  } else {
+    const chain = CHAINS.find((c) => validAddress(c, id));
+    nets = chain ? networksFor(chain).map((n) => ({ ...n, address: id })) : [];
+    if (!nets.length) return notFound();
+  }
+  const owner = await userFromRequest(env, request);
+  const isOwner = !!(rec && owner && owner.primary === rec.primary);
+  const short = id.length > 16 ? id.slice(0, 8) + '…' + id.slice(-6) : id;
+  return renderPaymentPage({ nets, short, settings: isOwner ? settingsHtml(rec) : '' });
+}
+
 function notFound() {
   const html = `<!doctype html>
 <html lang="ru"><head><meta charset="utf-8">
@@ -184,7 +179,7 @@ function notFound() {
 <style>${BASE_CSS}</style></head><body>
 <div class="card"><h1>Страница не найдена</h1>
 <div class="muted">Ссылка на оплату не существует или адрес получателя в ней некорректный.</div>
-<p><a href="/">На главную</a></p></div>
+<p><a href="/">Реквизиты pay.pxbt.app</a></p></div>
 </body></html>`;
   return new Response(html, { status: 404, headers: { 'content-type': 'text/html; charset=utf-8' } });
 }

@@ -5,7 +5,7 @@
  * enabled хранит только явные решения; отсутствующий ключ = включено.
  * Сети/токены не дублируются: берутся из functions/pay/index.js (NETWORKS, EVM_TOKENS).
  */
-import { NETWORKS, EVM_TOKENS } from '../pay/index.js';
+import { NETWORKS, EVM_TOKENS } from './networks.js';
 
 const enc = new TextEncoder();
 const CHAIN_ORDER = ['evm', 'tron', 'solana', 'btc', 'ton'];

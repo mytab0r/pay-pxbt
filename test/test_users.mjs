@@ -32,11 +32,14 @@ try {
     assert.match(html, /Подключить кошелёк/);
     for (const step of ['Шаг 1', 'Шаг 2', 'Шаг 3']) assert.ok(html.includes(step), 'шаг лендинга: ' + step);
   }
-  // старая страница реквизитов переехала на /pay
+  // старая страница реквизитов переехала на /pay и показывает выбор сети, а не все сети сразу
   {
     const r = await req('/pay');
     assert.strictEqual(r.status, 200);
-    assert.match(await r.text(), /Реквизиты/);
+    const html = await r.text();
+    assert.match(html, /Реквизиты/);
+    assert.match(html, /id="opts"/, 'на /pay есть выбор сети');
+    assert.ok(!html.includes('0x1234'), 'адреса не вываливаются в HTML — показываются после выбора сети');
   }
   // запись пользователя: evm + tron, tron явно выключен; tron-адрес — алиас
   const rec = { id: EVM, primary: EVM, addresses: { evm: EVM, tron: TRON }, enabled: { tron: false }, createdAt: 1, updatedAt: 1 };

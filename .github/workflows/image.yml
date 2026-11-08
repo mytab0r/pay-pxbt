@@ -91,14 +91,14 @@ jobs:
       - name: pre-pull base (4 attempts, resumable layers)
         if: steps.fresh.outputs.ok == 'true'
         run: |
-          B=$(sed -n 's/^FROM //p' deploy/pay-page/Dockerfile | head -1)
+          B=$(sed -n 's/^FROM //p' deploy/pay-page/Dockerfile | head -1 | awk '{print $1}')  # FROM node:22-alpine AS web -> node:22-alpine
           for n in 1 2 3 4; do docker pull -q "$B" && break; [ $n = 4 ] && exit 1; echo "pull $B: попытка $n не удалась, повтор через $((n*20)) с"; sleep $((n*20)); done
       # root-cause t_1b6fdb47: workflow_dispatch минует ci -> образ с SyntaxError ушёл в :latest, прод в crashloop.
       # Синтаксис сервера проверяем до push на любом событии.
       - name: syntax gate (node --check server.mjs)
         if: steps.fresh.outputs.ok == 'true'
         run: |
-          B=$(sed -n 's/^FROM //p' deploy/pay-page/Dockerfile | head -1)
+          B=$(sed -n 's/^FROM //p' deploy/pay-page/Dockerfile | head -1 | awk '{print $1}')  # FROM node:22-alpine AS web -> node:22-alpine
           # stdin, не bind-mount: демон Docker Desktop не видит FS раннера
           docker run --rm -i "$B" sh -c 'cat > /tmp/s.mjs && node --check /tmp/s.mjs' < deploy/pay-page/server.mjs
           # push-path сборка идёт мимо e2e-admin: синтаксис каждого functions/*.js проверяем здесь (t_pay-decouple)

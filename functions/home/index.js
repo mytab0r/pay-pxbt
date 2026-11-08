@@ -109,6 +109,11 @@ const api = async (url, body) => {
 const hexUtf8 = (s) => '0x' + Array.from(new TextEncoder().encode(s), (b) => b.toString(16).padStart(2, '0')).join('');
 const rejected = (e) => e && (e.code === 4001 || /declined|reject|denied|cancel/i.test(String((e && e.message) || e)));
 const nonceMsg = (nonce) => 'pay.pxbt.app: claim ' + nonce + '\\nвладелец pxbt.app';
+// Кошелёк может не ответить вовсе (зависшее расширение, закрытая вкладка) — не держим кнопку вечно.
+const withTimeout = (p, ms, msg) => Promise.race([
+  p,
+  new Promise((_, rej) => setTimeout(() => rej(Object.assign(new Error(msg || 'кошелёк не ответил'), { code: 4001, connect: true })), ms)),
+]);
 
 // WalletConnect: бандл лежит на нашем домене, грузим его фоном сразу после отрисовки страницы.
 let wcP = null;
@@ -290,15 +295,15 @@ async function claim(chain) {
     if (chain === 'ton') {
       ({ nonce, message } = await api('/api/u/nonce', { chain }));
       if (!nonce) throw new Error('сервер не выдал nonce');
-      w = await tonWallet(message || nonceMsg(nonce));
+      w = await withTimeout(tonWallet(message || nonceMsg(nonce)), 190000);
     } else {
-      w = await WALLETS[chain]();
+      w = await withTimeout(WALLETS[chain](), 180000);
       ({ nonce, message } = await api('/api/u/nonce', { chain }));
       if (!nonce) throw new Error('сервер не выдал nonce');
     }
     const address = w.address;
     if (!address) throw new Error('кошелёк не вернул адрес');
-    const signature = await w.sign(message || nonceMsg(nonce));
+    const signature = await withTimeout(w.sign(message || nonceMsg(nonce)), 120000);
     const j = await api('/api/u/claim', { chain, address, signature, nonce });
     if (!j.ok) throw new Error(j.error || 'отказ сервера');
     finishRow(d, true, chain + ': ' + short(address));

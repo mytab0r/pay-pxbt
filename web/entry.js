@@ -28,28 +28,56 @@ function accountsOf(provider, key) {
   return (ns.accounts || []).map((a) => String(a).split(':').slice(2).join(':'));
 }
 
+/** Хвосты прошлых сессий в localStorage блокируют новую попытку («полубитое» состояние). */
+function clearWalletConnectStorage() {
+  try {
+    for (const k of Object.keys(localStorage)) {
+      if (k.startsWith('wc@') || k.startsWith('walletconnect')) localStorage.removeItem(k);
+    }
+  } catch (e) {}
+}
+
+const CONNECT_TIMEOUT = 180000;
+
 window.PayWC = {
   /**
    * Одно подключение -> { evm, solana }. Каждое поле либо { address, sign }, либо null,
    * если кошелёк эту цепочку не умеет.
    */
   async connect({ projectId }) {
+    // Каждая попытка начинается с чистого состояния: после отмены WC оставлял
+    // недописанную сессию, и следующее подключение молча зависало.
+    clearWalletConnectStorage();
     const provider = await UniversalProvider.init({ projectId, metadata: metadata() });
+    // Страховка на случай, если хранилище пережило очистку: полусессия блокирует новую попытку.
+    if (provider.session) { try { await provider.disconnect(); } catch (e) {} }
     const modal = new WalletConnectModal({ projectId, themeMode: 'dark' });
     provider.on('display_uri', (uri) => modal.openModal({ uri }));
 
+    let timer;
     try {
-      await provider.connect({
-        // eip155 обязателен; solana — optional: MetaMask и другие EVM-only кошельки
-        // иначе отклонили бы всю сессию.
-        namespaces: {
-          eip155: { methods: ['eth_sendTransaction', 'personal_sign', 'eth_sign'], chains: EVM_CHAINS, events: ['accountsChanged', 'chainChanged'] },
-        },
-        optionalNamespaces: {
-          solana: { methods: ['solana_signMessage', 'solana_signTransaction'], chains: [SOLANA_CHAIN], events: ['accountsChanged'] },
-        },
-      });
+      await Promise.race([
+        provider.connect({
+          // eip155 обязателен; solana — optional: MetaMask и другие EVM-only кошельки
+          // иначе отклонили бы всю сессию.
+          namespaces: {
+            eip155: { methods: ['eth_sendTransaction', 'personal_sign', 'eth_sign'], chains: EVM_CHAINS, events: ['accountsChanged', 'chainChanged'] },
+          },
+          optionalNamespaces: {
+            solana: { methods: ['solana_signMessage', 'solana_signTransaction'], chains: [SOLANA_CHAIN], events: ['accountsChanged'] },
+          },
+        }),
+        new Promise((_, rej) => {
+          timer = setTimeout(() => rej(Object.assign(new Error('подключение отклонено'), { code: 4001, connect: true })), CONNECT_TIMEOUT);
+        }),
+      ]);
+    } catch (e) {
+      // сбрасываем всё, что могло остаться: следующая попытка должна быть с нуля
+      try { await provider.disconnect(); } catch (e2) {}
+      clearWalletConnectStorage();
+      throw e;
     } finally {
+      clearTimeout(timer);
       try { modal.closeModal(); } catch (e) {}
     }
 

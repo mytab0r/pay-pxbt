@@ -13,6 +13,8 @@ const NET_CHIPS = ['USDT · Tron', 'Ethereum', 'BNB Chain', 'Polygon', 'Arbitrum
 
 export async function onRequestGet({ env = {} } = {}) {
   const projectId = env.REOWN_PROJECT_ID || '';
+  // версия в URL: иначе CDN отдаёт старый бандл до истечения max-age
+  const assetV = env.ASSET_VERSION || '';
   const chips = NET_CHIPS.map((n) => `<span class="chip">${n}</span>`).join('');
   const html = `<!doctype html>
 <html lang="ru"><head>
@@ -91,6 +93,7 @@ export async function onRequestGet({ env = {} } = {}) {
 <script>
 const CHAINS = ['evm', 'tron', 'solana', 'btc'];
 const PROJECT_ID = ${inline(projectId)};
+const ASSET_V = ${inline(assetV)};
 const NOWALLET_HINT = ${inline(NOWALLET_HINT)};
 const API_TIMEOUT = 15000;
 
@@ -114,7 +117,7 @@ function loadPayWC() {
   if (wcP) return wcP;
   wcP = new Promise((resolve, reject) => {
     const s = document.createElement('script');
-    s.src = '/assets/paywc.js';
+    s.src = '/assets/paywc.js' + (ASSET_V ? '?v=' + encodeURIComponent(ASSET_V) : '');
     s.async = true;
     s.onload = () => (window.PayWC ? resolve(window.PayWC) : reject(new Error('модуль кошелька не загрузился')));
     s.onerror = () => reject(new Error('модуль кошелька не загрузился'));

@@ -92,12 +92,26 @@ const json = (o, status = 200) => new Response(JSON.stringify(o), { status, head
 const html = (h, status = 200) => new Response(h, { status, headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' } });
 const newId = () => crypto.randomUUID().replace(/-/g, '').slice(0, 12);
 
+// Кардинальность src (t_13ad9ec6): публичный /api/tarot/reading принимает любой src, поэтому
+// держим не больше MAX_SRC ключей на поле, остальное уходит в other (+ счётчик src_dropped).
+// ponytail: слот занимает src, пришедший первым; апгрейд до top-K/компакции — если кардинальность
+// начнут травить мусорными именами, вытесняющими настоящие источники.
+const MAX_SRC = 50;
+const capSrc = (m, src) => {
+  if (src === 'other' || m[src] !== undefined) return src;
+  return Object.keys(m).length - ('other' in m ? 1 : 0) < MAX_SRC ? src : 'other';
+};
+
 // Счётчики: всего (tarot:stats) + скользящее окно по дням (tarot:stats:<YYYY-MM-DD>, TTL 8 дней).
 async function bump(env, field, src) {
   // ponytail: get+put не атомарны в CF KV; в контейнере (FileKV, один процесс) гонки нет.
   for (const [key, opt] of [['tarot:stats', {}], [dayKey(), { expirationTtl: DAY_TTL }]]) {
     const st = JSON.parse((await env.KV.get(key)) || JSON.stringify(EMPTY()));
-    if (src) st[field][src] = (st[field][src] || 0) + 1; else st[field] += 1;
+    if (src) {
+      const k = capSrc(st[field], src);
+      st[field][k] = (st[field][k] || 0) + 1;
+      if (k !== src) st.src_dropped = (st.src_dropped || 0) + 1;
+    } else st[field] += 1;
     await env.KV.put(key, JSON.stringify(st), opt);
   }
 }
@@ -179,7 +193,9 @@ export async function paidReading({ env, params }) {
 }
 
 /** Read-only funnel counters: all time at top level, plus `last7`. No PII, no ids. */
-export async function stats({ env }) {
-  const all = JSON.parse((await env.KV.get('tarot:stats')) || JSON.stringify(EMPTY()));
-  return json({ ...all, last7: await last7(env) });
+export async function stats({ env, request }) {
+  const { src_dropped, ...all } = JSON.parse((await env.KV.get('tarot:stats')) || JSON.stringify(EMPTY()));
+  // публичный /api/tarot/stats.json держит прежний формат; src_dropped — только на токен-роуте
+  const withDropped = request && !new URL(request.url).pathname.endsWith('.json');
+  return json({ ...all, ...(withDropped && src_dropped ? { src_dropped } : {}), last7: await last7(env) });
 }

@@ -201,6 +201,7 @@ export function makeServer({ dataDir, ownerEmail, apiToken, accessTeam, accessAu
     if (p === '/api/tarot/reading' && m === 'POST') return tarot.reading(ctx());
     if (p === '/api/tarot/deep' && m === 'POST') return tarot.deep(ctx());
     if ((mm = p.match(/^\/tarot\/r\/([A-Za-z0-9]{1,64})$/)) && m === 'GET') return tarot.paidReading(ctx({ id: mm[1] }));
+    if (p === '/api/tarot/stats.json' && m === 'GET') return tarot.stats(ctx()); // публичный: только числа воронки
     if (p === '/api/tarot/stats' && m === 'GET') {
       const tok = (request.headers.get('authorization') || '').replace(/^Bearer /, '');
       return apiToken && safeEq(tok, apiToken) ? tarot.stats(ctx()) : json({ error: 'forbidden' }, 403);

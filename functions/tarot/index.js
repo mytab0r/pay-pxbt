@@ -76,19 +76,42 @@ export function draw(seed, n) {
 }
 
 export const PRICE = 9;
-const SOURCES = ['ig', 'tiktok', 'yt', 'tg'];
 const TTL = 60 * 60 * 24 * 30;
-const bucket = (s) => (SOURCES.includes(s) ? s : 'other');
+const DAY_TTL = 60 * 60 * 24 * 8;
+const DEFAULT_SRC = 'web';
+// Атрибуция (t_cda5a575): любой src из [a-z0-9_-]{1,16} доходит до счётчика, остальное -> other.
+const SRC_RE = /^[a-z0-9_-]{1,16}$/;
+const bucket = (s) => {
+  const v = String(s == null ? '' : s).toLowerCase();
+  return SRC_RE.test(v) ? v : 'other';
+};
+const EMPTY = () => ({ visits: {}, leads: {}, checkouts: 0, paid: 0 });
+const dayKey = (offset = 0) => 'tarot:stats:' + new Date(Date.now() - offset * 86400000).toISOString().slice(0, 10);
 const esc = (v) => String(v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const json = (o, status = 200) => new Response(JSON.stringify(o), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
 const html = (h, status = 200) => new Response(h, { status, headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' } });
 const newId = () => crypto.randomUUID().replace(/-/g, '').slice(0, 12);
 
+// Счётчики: всего (tarot:stats) + скользящее окно по дням (tarot:stats:<YYYY-MM-DD>, TTL 8 дней).
 async function bump(env, field, src) {
   // ponytail: get+put не атомарны в CF KV; в контейнере (FileKV, один процесс) гонки нет.
-  const st = JSON.parse((await env.KV.get('tarot:stats')) || '{"visits":{},"leads":{},"checkouts":0,"paid":0}');
-  if (src) st[field][src] = (st[field][src] || 0) + 1; else st[field] += 1;
-  await env.KV.put('tarot:stats', JSON.stringify(st));
+  for (const [key, opt] of [['tarot:stats', {}], [dayKey(), { expirationTtl: DAY_TTL }]]) {
+    const st = JSON.parse((await env.KV.get(key)) || JSON.stringify(EMPTY()));
+    if (src) st[field][src] = (st[field][src] || 0) + 1; else st[field] += 1;
+    await env.KV.put(key, JSON.stringify(st), opt);
+  }
+}
+
+async function last7(env) {
+  const out = EMPTY();
+  for (let i = 0; i < 7; i++) {
+    const st = JSON.parse((await env.KV.get(dayKey(i))) || 'null');
+    if (!st) continue;
+    for (const f of ['visits', 'leads']) for (const [k, n] of Object.entries(st[f] || {})) out[f][k] = (out[f][k] || 0) + n;
+    out.checkouts += st.checkouts || 0;
+    out.paid += st.paid || 0;
+  }
+  return out;
 }
 
 const STYLE = `<style>body{font-family:Georgia,serif;max-width:560px;margin:0 auto;padding:16px;background:#120d1f;color:#eee}
@@ -99,7 +122,7 @@ const page = (title, body) => `<!doctype html><html lang="en"><head><meta charse
 
 /** GET /tarot?src=ig — landing, counts the visit. */
 export async function landing({ env, request }) {
-  const src = bucket(new URL(request.url).searchParams.get('src'));
+  const src = bucket(new URL(request.url).searchParams.get('src') || DEFAULT_SRC);
   await bump(env, 'visits', src);
   return html(page('Free Tarot Reading', `<div class="card"><h1>Your free tarot reading</h1>
 <p>Ask one question and draw a card. The first reading is free.</p>
@@ -123,7 +146,7 @@ window.open(r.pay_url,'_blank');};
 /** POST /api/tarot/reading {question, src} -> free card (= lead). */
 export async function reading({ env, request }) {
   const b = await request.json().catch(() => ({}));
-  const id = newId(), src = bucket(b.src);
+  const id = newId(), src = bucket(b.src || DEFAULT_SRC);
   await env.KV.put('tarot:reading:' + id, JSON.stringify({ q: String(b.question || '').slice(0, 300), src, ms: Date.now() }), { expirationTtl: TTL });
   await bump(env, 'leads', src);
   return json({ id, card: draw(id, 1)[0] });
@@ -155,6 +178,8 @@ export async function paidReading({ env, params }) {
   return html(page('Your deep reading', `<div class="card"><h1>Your deep reading</h1>${r.q ? `<p class="muted">Question: ${esc(r.q)}</p>` : ''}</div>${rows}`));
 }
 
+/** Read-only funnel counters: all time at top level, plus `last7`. No PII, no ids. */
 export async function stats({ env }) {
-  return json(JSON.parse((await env.KV.get('tarot:stats')) || '{"visits":{},"leads":{},"checkouts":0,"paid":0}'));
+  const all = JSON.parse((await env.KV.get('tarot:stats')) || JSON.stringify(EMPTY()));
+  return json({ ...all, last7: await last7(env) });
 }
